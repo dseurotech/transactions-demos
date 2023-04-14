@@ -18,6 +18,12 @@ public class TransactionDemo {
         txManagerFactory = new JpaTxManagerFactory(2);
     }
 
+    /**
+     * This demonstrates the transaction isolation, and the fact that changes within the tx boundary are automatically persisted
+     * at the end of the transaction, even without an explicit merge/persist of the entity
+     *
+     * @throws InterruptedException never, really
+     */
     @Test
     public void demoAutoUpdate() throws InterruptedException {
         final TxManager txManager = txManagerFactory.create("demos");
@@ -30,7 +36,7 @@ public class TransactionDemo {
                 t1Found.setContent("Changed content");
                 Utils.print("T1", "changed entity content");
                 Utils.fetchAndPrint(tx, "T1", initialEntity.getId(), LockModeType.NONE);
-                //Even flushing, the change is not seen from the outside thread
+                //Even flushing, the change is not seen from the outside thread until the session is concluded
                 final EntityManager em = JpaAwareTxContext.extractEntityManager(tx);
                 em.flush();
                 Utils.sleep(200);

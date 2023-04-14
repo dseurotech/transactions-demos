@@ -11,6 +11,20 @@ public class ConcurrentUpdateDelete {
     final EntityManagerSession ems = new EntityManagerSession(new AbstractEntityManagerFactory("demos") {
     });
 
+    /**
+     * This demonstrates the interaction between two different threads (T1 and T2) concurrently operating on the same entity,
+     * using the current Kapua model (no transaction management)
+     * <p>
+     * T1 starts first and fetches the entity, then waits 2 seconds before deleting it
+     * T2 starts after 1 second, immediately fetches the entity and updates it
+     * the Main thread checks the value of the entity at different points in time
+     * <p>
+     * This utility method is meant to be invoked by the test {@link #demoConcurrentUpdateDelete()}
+     *
+     * @param t1Throws Whether T1 should throw just before completing the transaction (demonstating the behaviour of the system in case of rollbacks)
+     * @return The final state of the entity, fetched by the main thread after all other threads are complete
+     * @throws InterruptedException never, really
+     */
     private DemoEntity doDemoConcurrentUpdateDelete(boolean t1Throws) throws InterruptedException {
         final DemoEntity initialEntity = Utils.createEntity(ems, "Initial content");
         Thread t1 = new Thread(() -> {
@@ -50,15 +64,21 @@ public class ConcurrentUpdateDelete {
         return Utils.fetchAndPrint(ems, "MAIN", initialEntity.getId());
     }
 
+    /**
+     * This executes {@link #doDemoConcurrentUpdateDelete(boolean)} without and with T1 failing.
+     * The two threads are not isolated from each other, and the last to complete overrides all the changes from the other
+     *
+     * @throws InterruptedException never, really
+     */
     @Test
     public void demoConcurrentUpdateDelete() throws InterruptedException {
-        {
+        { //T1 NOT throwing
             DemoEntity res = doDemoConcurrentUpdateDelete(false);
-            //WRONG: T2 completed correctly, where is the updated entity?
+            //WRONG: T2 completed correctly (did not see the entity deleted), where is the updated entity?
             Assertions.assertNull(res);
         }
         System.out.println("\n\n\n");
-        {
+        { //T1 DOES throw
             DemoEntity res = doDemoConcurrentUpdateDelete(true);
             //WRONG: T1 failed, and yet the entity is deleted
             Assertions.assertNull(res);
