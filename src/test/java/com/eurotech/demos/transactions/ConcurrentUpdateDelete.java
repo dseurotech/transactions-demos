@@ -1,6 +1,5 @@
-package com.eurotech.demos;
+package com.eurotech.demos.transactions;
 
-import com.eurotech.demos.transactions.DemoEntity;
 import com.eurotech.persistence.transactions.TxManager;
 import com.eurotech.persistence.transactions.jpa.JpaAwareTxContext;
 import com.eurotech.persistence.transactions.jpa.JpaTxManagerFactory;
@@ -20,7 +19,7 @@ public class ConcurrentUpdateDelete {
         txManagerFactory = new JpaTxManagerFactory(2);
     }
 
-    private DemoEntity demoConcurrentUpdateDelete(LockModeType t1LockType, boolean flushT1, LockModeType t2LockType) throws InterruptedException {
+    private DemoEntity demoConcurrentUpdateDelete(LockModeType t1LockType, boolean flushT1, LockModeType t2LockType, boolean t1Throws) throws InterruptedException {
         System.out.println("\n\n***************************************");
         Utils.print("TEST", String.format("t1 lock: %s, t1 flushes: %s, t2 lock: %s", t1LockType, flushT1, t2LockType));
 
@@ -32,13 +31,17 @@ public class ConcurrentUpdateDelete {
             txManagerT1.execute(tx -> {
                 final DemoEntity t1Found = Utils.fetchAndPrint(tx, "T1", initialEntity.getId(), t1LockType);
                 final EntityManager em = JpaAwareTxContext.extractEntityManager(tx);
+                Utils.sleep(2000);
                 em.remove(t1Found);
                 Utils.print("T1", "deletes entity");
                 if (flushT1) {
                     em.flush();
                 }
                 Utils.fetchAndPrint(tx, "T1", initialEntity.getId(), LockModeType.NONE);
-                Utils.sleep(2000);
+                if (t1Throws) {
+                    Utils.print("T1", "Goes baboom!");
+                    throw new RuntimeException("BABOOM!!");
+                }
                 return Utils.fetchAndPrint(tx, "T1", initialEntity.getId(), LockModeType.NONE);
             });
         });
@@ -70,39 +73,73 @@ public class ConcurrentUpdateDelete {
 
     @Test
     public void demoConcurrentUpdateDelete() throws InterruptedException {
-        demoConcurrentUpdateDelete(LockModeType.NONE, false, LockModeType.NONE);
+        demoConcurrentUpdateDelete(LockModeType.NONE, false, LockModeType.NONE, false);
     }
 
     @Test
     public void demoConcurrentUpdateDeleteScenarios() throws InterruptedException {
         {
-            final DemoEntity res = demoConcurrentUpdateDelete(LockModeType.NONE, false, LockModeType.NONE);
+            final DemoEntity res = demoConcurrentUpdateDelete(LockModeType.NONE, false, LockModeType.NONE, false);
             Assertions.assertNull(res);
         }
         {
-            final DemoEntity res = demoConcurrentUpdateDelete(LockModeType.NONE, true, LockModeType.NONE);
+            final DemoEntity res = demoConcurrentUpdateDelete(LockModeType.NONE, true, LockModeType.NONE, false);
             Assertions.assertEquals(1, res.getChangesCounter());
             Assertions.assertEquals("Content from T2", res.getContent());
         }
         {
-            final DemoEntity res = demoConcurrentUpdateDelete(LockModeType.PESSIMISTIC_WRITE, false, LockModeType.NONE);
+            final DemoEntity res = demoConcurrentUpdateDelete(LockModeType.PESSIMISTIC_WRITE, false, LockModeType.NONE, false);
             Assertions.assertEquals(1, res.getChangesCounter());
             Assertions.assertEquals("Content from T2", res.getContent());
         }
         {
-            final DemoEntity res = demoConcurrentUpdateDelete(LockModeType.PESSIMISTIC_WRITE, true, LockModeType.NONE);
+            final DemoEntity res = demoConcurrentUpdateDelete(LockModeType.PESSIMISTIC_WRITE, true, LockModeType.NONE, false);
             Assertions.assertEquals(1, res.getChangesCounter());
             Assertions.assertEquals("Content from T2", res.getContent());
         }
         {
-            final DemoEntity res = demoConcurrentUpdateDelete(LockModeType.PESSIMISTIC_WRITE, false, LockModeType.PESSIMISTIC_READ);
+            final DemoEntity res = demoConcurrentUpdateDelete(LockModeType.PESSIMISTIC_WRITE, false, LockModeType.PESSIMISTIC_READ, false);
             Assertions.assertNull(res);
         }
         {
 
-            final DemoEntity res = demoConcurrentUpdateDelete(LockModeType.PESSIMISTIC_WRITE, true, LockModeType.PESSIMISTIC_READ);
+            final DemoEntity res = demoConcurrentUpdateDelete(LockModeType.PESSIMISTIC_WRITE, true, LockModeType.PESSIMISTIC_READ, false);
             Assertions.assertNull(res);
         }
     }
 
+    @Test
+    public void demoConcurrentUpdateDeleteScenariosWithT1Throwing() throws InterruptedException {
+        {
+            final DemoEntity res = demoConcurrentUpdateDelete(LockModeType.NONE, false, LockModeType.NONE, true);
+            Assertions.assertEquals(1, res.getChangesCounter());
+            Assertions.assertEquals("Content from T2", res.getContent());
+        }
+        {
+            final DemoEntity res = demoConcurrentUpdateDelete(LockModeType.NONE, true, LockModeType.NONE, true);
+            Assertions.assertEquals(1, res.getChangesCounter());
+            Assertions.assertEquals("Content from T2", res.getContent());
+        }
+        {
+            final DemoEntity res = demoConcurrentUpdateDelete(LockModeType.PESSIMISTIC_WRITE, false, LockModeType.NONE, true);
+            Assertions.assertEquals(1, res.getChangesCounter());
+            Assertions.assertEquals("Content from T2", res.getContent());
+        }
+        {
+            final DemoEntity res = demoConcurrentUpdateDelete(LockModeType.PESSIMISTIC_WRITE, true, LockModeType.NONE, true);
+            Assertions.assertEquals(1, res.getChangesCounter());
+            Assertions.assertEquals("Content from T2", res.getContent());
+        }
+        {
+            final DemoEntity res = demoConcurrentUpdateDelete(LockModeType.PESSIMISTIC_WRITE, false, LockModeType.PESSIMISTIC_READ, true);
+            Assertions.assertEquals(1, res.getChangesCounter());
+            Assertions.assertEquals("Content from T2", res.getContent());
+        }
+        {
+
+            final DemoEntity res = demoConcurrentUpdateDelete(LockModeType.PESSIMISTIC_WRITE, true, LockModeType.PESSIMISTIC_READ, true);
+            Assertions.assertEquals(1, res.getChangesCounter());
+            Assertions.assertEquals("Content from T2", res.getContent());
+        }
+    }
 }

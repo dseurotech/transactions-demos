@@ -1,6 +1,5 @@
-package com.eurotech.demos;
+package com.eurotech.demos.transactions;
 
-import com.eurotech.demos.transactions.DemoEntity;
 import com.eurotech.persistence.transactions.TxContext;
 import com.eurotech.persistence.transactions.jpa.JpaAwareTxContext;
 
