@@ -13,6 +13,7 @@
 package org.eclipse.kapua.commons.jpa;
 
 import com.eurotech.demos.transactions.DemoEntity;
+import com.eurotech.demos.transactions.NonVersionedEntity;
 
 import javax.persistence.EntityExistsException;
 import javax.persistence.EntityNotFoundException;
@@ -39,7 +40,7 @@ public class DemoDAO {
             throw new EntityExistsException(e);
         } catch (PersistenceException e) {
             if (isInsertConstraintViolation(e)) {
-                DemoEntity entityFound = em.find(DemoEntity.class, entity.getId(), null);
+                DemoEntity entityFound = em.find(NonVersionedEntity.class, entity.getId(), null);
                 if (entityFound == null) {
                     throw e;
                 }
@@ -54,14 +55,14 @@ public class DemoDAO {
 
     public static DemoEntity find(EntityManager em, Long entityId) {
         // Checking existence
-        DemoEntity entityToFind = em.find(DemoEntity.class, entityId, null);
+        DemoEntity entityToFind = em.find(NonVersionedEntity.class, entityId, null);
         return entityToFind;
     }
 
     public static DemoEntity update(EntityManager em, DemoEntity entity) {
         //
         // Checking existence
-        DemoEntity entityToUpdate = em.find(DemoEntity.class, entity.getId(), null);
+        DemoEntity entityToUpdate = em.find(NonVersionedEntity.class, entity.getId(), null);
 
         //
         // Updating if not null
@@ -70,7 +71,7 @@ public class DemoDAO {
             em.flush();
             em.refresh(entityToUpdate);
         } else {
-            throw new EntityNotFoundException(DemoEntity.class.getSimpleName());
+            throw new EntityNotFoundException(NonVersionedEntity.class.getSimpleName());
         }
 
         return entityToUpdate;
@@ -86,7 +87,7 @@ public class DemoDAO {
             em.remove(entityToDelete);
             em.flush();
         } else {
-            throw new EntityNotFoundException(DemoEntity.class.getSimpleName());
+            throw new EntityNotFoundException(NonVersionedEntity.class.getSimpleName());
         }
 
         //

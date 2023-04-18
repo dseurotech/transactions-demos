@@ -5,11 +5,9 @@ import com.eurotech.persistence.transactions.jpa.JpaAwareTxContext;
 
 import javax.persistence.EntityManager;
 import javax.persistence.LockModeType;
-import javax.persistence.Query;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
-import java.util.List;
 
 public class Utils {
 
@@ -27,18 +25,9 @@ public class Utils {
         }
     }
 
-    protected static DemoEntity createEntity(TxContext tx, String content) {
+    protected static <E extends DemoEntity> E fetchAndPrint(TxContext tx, Class<E> clazz, String thread, Long id, LockModeType lockModeType) {
         final EntityManager em = JpaAwareTxContext.extractEntityManager(tx);
-        // create new demoEntity
-        final DemoEntity demoEntity = new DemoEntity();
-        demoEntity.setContent(content);
-        em.persist(demoEntity);
-        return demoEntity;
-    }
-
-    protected static DemoEntity fetchAndPrint(TxContext tx, String thread, Long id, LockModeType lockModeType) {
-        final EntityManager em = JpaAwareTxContext.extractEntityManager(tx);
-        final DemoEntity found = em.find(DemoEntity.class, id, lockModeType);
+        final E found = em.find(clazz, id, lockModeType);
         print(thread, found);
         return found;
     }
@@ -47,13 +36,4 @@ public class Utils {
         System.out.println(time() + " - " + thread + ": " + message);
     }
 
-    protected static void printEntitiesList(TxContext tx) {
-        final EntityManager em = JpaAwareTxContext.extractEntityManager(tx);
-        final Query q = em.createQuery("select t from DemoEntity t");
-        final List<DemoEntity> demoEntityList = q.getResultList();
-        for (DemoEntity tod : demoEntityList) {
-            System.out.println(tod);
-        }
-        System.out.println("Size: " + demoEntityList.size());
-    }
 }

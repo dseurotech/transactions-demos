@@ -1,43 +1,12 @@
 package com.eurotech.demos.transactions;
 
-import javax.persistence.Entity;
-import javax.persistence.GeneratedValue;
-import javax.persistence.GenerationType;
-import javax.persistence.Id;
-import javax.persistence.PreUpdate;
+public interface DemoEntity {
+    Long getId();
 
-@Entity
-public class DemoEntity {
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
-    private String content;
-    private int changesCounter = 0;
+    String getContent();
 
-    public Long getId() {
-        return id;
-    }
+    void setContent(String content);
 
-    public String getContent() {
-        return content;
-    }
+    int getChangesCounter();
 
-    public void setContent(String content) {
-        this.content = content;
-    }
-
-    public int getChangesCounter() {
-        return changesCounter;
-    }
-
-    @PreUpdate
-//    @PrePersist
-    private void upCounter() {
-        this.changesCounter = this.changesCounter + 1;
-    }
-
-    @Override
-    public String toString() {
-        return "DemoEntity [id=" + id + ", changesCounter=" + changesCounter + ", content=" + content + "]";
-    }
 }

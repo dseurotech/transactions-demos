@@ -26,7 +26,7 @@ public class ConcurrentUpdateDelete {
      * @throws InterruptedException never, really
      */
     private DemoEntity doDemoConcurrentUpdateDelete(boolean t1Throws) throws InterruptedException {
-        final DemoEntity initialEntity = Utils.createEntity(ems, "Initial content");
+        final DemoEntity initialEntity = Utils.createEntity(ems, "Entity Content");
         Thread t1 = new Thread(() -> {
             Utils.print("T1", "started");
             final DemoEntity t1Found = Utils.fetchAndPrint(ems, "T1", initialEntity.getId());
@@ -46,7 +46,8 @@ public class ConcurrentUpdateDelete {
                 Utils.print("T2", "notices null entity and exits");
                 return;
             }
-            t2Found.setContent("Content from T2");
+            t2Found.setContent(t2Found.getContent() + " plus T2");
+            ;
             ems.doTransactedAction(e -> DemoDAO.update(e, t2Found));
             Utils.print("T2", "changed entity content");
             Utils.fetchAndPrint(ems, "T2", initialEntity.getId());

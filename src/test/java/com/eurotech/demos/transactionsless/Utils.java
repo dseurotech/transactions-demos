@@ -1,6 +1,7 @@
 package com.eurotech.demos.transactionsless;
 
 import com.eurotech.demos.transactions.DemoEntity;
+import com.eurotech.demos.transactions.NonVersionedEntity;
 import org.eclipse.kapua.commons.jpa.DemoDAO;
 import org.eclipse.kapua.commons.jpa.EntityManagerSession;
 
@@ -26,7 +27,7 @@ public class Utils {
 
     protected static DemoEntity createEntity(EntityManagerSession ems, String content) {
         // create new demoEntity
-        final DemoEntity demoEntity = new DemoEntity();
+        final DemoEntity demoEntity = new NonVersionedEntity();
         demoEntity.setContent(content);
         return ems.doTransactedAction(e -> DemoDAO.create(e, demoEntity));
     }

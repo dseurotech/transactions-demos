@@ -26,11 +26,11 @@ public class ConcurrentUpdates {
      * @throws InterruptedException never, really
      */
     private DemoEntity doDemoConcurrentUpdate(boolean t1Throws) throws InterruptedException {
-        final DemoEntity initialEntity = Utils.createEntity(ems, "Initial content");
+        final DemoEntity initialEntity = Utils.createEntity(ems, "Entity Content");
         Thread t1 = new Thread(() -> {
             Utils.print("T1", "started");
             final DemoEntity t1Found = Utils.fetchAndPrint(ems, "T1", initialEntity.getId());
-            t1Found.setContent("Content from T1");
+            t1Found.setContent(t1Found.getContent() + " plus T1");
             Utils.sleep(2000);
             ems.doTransactedAction(e -> DemoDAO.update(e, t1Found));
             Utils.print("T1", "changed entity content");
@@ -43,7 +43,8 @@ public class ConcurrentUpdates {
         Thread t2 = new Thread(() -> {
             Utils.print("T2", "started");
             final DemoEntity t2Found = Utils.fetchAndPrint(ems, "T2", initialEntity.getId());
-            t2Found.setContent("Content from T2");
+            t2Found.setContent(t2Found.getContent() + " plus T2");
+            ;
             ems.doTransactedAction(e -> DemoDAO.update(e, t2Found));
             Utils.print("T2", "changed entity content");
             Utils.fetchAndPrint(ems, "T2", initialEntity.getId());
@@ -73,7 +74,7 @@ public class ConcurrentUpdates {
         //WRONG: Why 1? two threads updated!
         Assertions.assertEquals(1, res.getChangesCounter());
         //WRONG: T2 results are wiped out
-        Assertions.assertEquals("Content from T1", res.getContent());
+        Assertions.assertTrue(res.getContent().contains("T1"));
     }
 
     /**
@@ -87,6 +88,6 @@ public class ConcurrentUpdates {
         DemoEntity res = doDemoConcurrentUpdate(true);
         Assertions.assertEquals(1, res.getChangesCounter());
         //WRONG: T1 failed, why is this here?
-        Assertions.assertEquals("Content from T1", res.getContent());
+        Assertions.assertTrue(res.getContent().contains("T1"));
     }
 }

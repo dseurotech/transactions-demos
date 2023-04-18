@@ -16,9 +16,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.persistence.EntityExistsException;
+import javax.persistence.OptimisticLockException;
+import javax.persistence.PessimisticLockException;
+import javax.persistence.RollbackException;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.function.BiConsumer;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 public class TxManagerImpl implements TxManager {
@@ -41,6 +45,17 @@ public class TxManagerImpl implements TxManager {
                             .forEach(additionalTxConsumer -> additionalTxConsumer.accept(txContext, res));
                     txContext.commit();
                     return res;
+                } catch (OptimisticLockException | PessimisticLockException | RollbackException e) {
+                    Predicate isLockExceptionTester = t -> t instanceof OptimisticLockException || t instanceof PessimisticLockException;
+                    final boolean isValidLockException = isLockExceptionTester.test(e) || (e instanceof RollbackException && isLockExceptionTester.test(e.getCause()));
+                    if (isValidLockException) {
+                        logger.error("Lock exception, retrying", e);
+                        txContext.rollback();
+                    } else {
+                        logger.error("Non recoverable lock exception", e);
+                        txContext.rollback();
+                        throw txContext.convertPersistenceException(e);
+                    }
                 } catch (EntityExistsException e) {
                     /*
                      * Most KapuaEntities inherit from AbstractKapuaEntity, which auto-generates ids via a method marked with @PrePersist and the use of
@@ -49,10 +64,6 @@ public class TxManagerImpl implements TxManager {
                      * */
                     logger.warn("Conflict on entity creation. Cannot insert the entity, trying again!");
                     txContext.rollback();
-                    if (++retry >= maxInsertAttempts) {
-                        logger.error("Maximum number of attempts reached, aborting operation!");
-                        throw txContext.convertPersistenceException(e);
-                    }
                 } catch (Exception ex) {
                     txContext.rollback();
                     throw txContext.convertPersistenceException(ex);
