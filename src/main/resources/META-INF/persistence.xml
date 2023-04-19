@@ -6,6 +6,8 @@
         <class>com.eurotech.demos.transactions.NonVersionedEntity</class>
         <class>com.eurotech.demos.transactions.VersionedEntity</class>
         <properties>
+            <property name="eclipselink.target-database" value="Derby"/>
+            <property name="eclipselink.logging.level" value="OFF"/>
             <property name="javax.persistence.jdbc.driver" value="org.apache.derby.iapi.jdbc.AutoloadedDriver"/>
             <property name="javax.persistence.jdbc.url"
                       value="jdbc:derby:/tmp/databases/demoDb;create=true"/>

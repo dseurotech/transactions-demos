@@ -3,6 +3,7 @@ package com.eurotech.demos.transactions;
 import com.eurotech.persistence.repositories.DemoEntityRepository;
 import com.eurotech.persistence.transactions.TxManager;
 import com.eurotech.persistence.transactions.jpa.JpaTxManagerFactory;
+import org.javatuples.Triplet;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -34,7 +35,7 @@ public class ConcurrentUpdates {
      * @return The final state of the entity, fetched by the main thread after all other threads are complete
      * @throws InterruptedException never, really
      */
-    private <E extends DemoEntity> DemoEntity demoConcurrentUpdate(
+    private <E extends DemoEntity> Triplet<E, Boolean, Boolean> demoConcurrentUpdate(
             Class<E> clazz,
             Function<String, E> entityCreator,
             LockModeType t1LockType,
@@ -42,12 +43,12 @@ public class ConcurrentUpdates {
             LockModeType t2LockType,
             boolean t1Throws) throws InterruptedException {
         System.out.println("\n\n* Concurrent update demo with transactions **************************************");
-        Utils.print("TEST", String.format("t1 lock: %s, t1 throws: %s, t2 lock: %s", t1LockType, t1Throws, t2LockType));
+        Utils.print("TEST", String.format("class: %s, t1 lock: %s, t1 throws: %s, t2 lock: %s", clazz.getSimpleName(), t1LockType, t1Throws, t2LockType));
         final DemoEntityRepository<E> repo = new DemoEntityRepository<>(clazz);
         final TxManager txManager = txManagerFactory.create("demos");
         Supplier<TxManager> txSupplier = () -> txManagerFactory.create("demos");
         final DemoEntity initialEntity = txManager.execute(tx -> repo.create(tx, entityCreator.apply("Entity Content")));
-        final Thread t1 = new Thread(new Updater(
+        final Updater t1 = new Updater(
                 "T1",
                 clazz,
                 txSupplier,
@@ -56,8 +57,8 @@ public class ConcurrentUpdates {
                 t1SleepBeforeUpdate,
                 t1LockType,
                 t1Throws,
-                new DemoEntityRepository(clazz)));
-        final Thread t2 = new Thread(new Updater(
+                new DemoEntityRepository(clazz));
+        final Updater t2 = new Updater(
                 "T2",
                 clazz,
                 txSupplier,
@@ -66,7 +67,7 @@ public class ConcurrentUpdates {
                 500,
                 t2LockType,
                 false,
-                new DemoEntityRepository(clazz)));
+                new DemoEntityRepository(clazz));
         t1.start();
         Utils.sleep(1000);
         t2.start();
@@ -76,7 +77,10 @@ public class ConcurrentUpdates {
         txManager.execute(tx -> Utils.fetchAndPrint(tx, clazz, "MAIN", initialEntity.getId(), LockModeType.NONE));
         t2.join();
         Utils.print("MAIN", "T2 joined");
-        return txManager.execute(tx -> Utils.fetchAndPrint(tx, clazz, "MAIN", initialEntity.getId(), LockModeType.NONE));
+        return Triplet.with(
+                txManager.execute(tx -> Utils.fetchAndPrint(tx, clazz, "MAIN", initialEntity.getId(), LockModeType.NONE)),
+                t1.threadFailed.get(),
+                t2.threadFailed.get());
     }
 
     /**
@@ -96,29 +100,37 @@ public class ConcurrentUpdates {
     public void lockMode_Null() throws InterruptedException {
         //Non versioned:  the last to close wins, overrides the other
         {
-            final DemoEntity res = demoConcurrentUpdate(NonVersionedEntity.class, NonVersionedEntity::newEntity,
+            final Triplet<NonVersionedEntity, Boolean, Boolean> res = demoConcurrentUpdate(NonVersionedEntity.class, NonVersionedEntity::newEntity,
                     null, 2000, null, false);
-            Assertions.assertEquals(1, res.getChangesCounter());
-            Assertions.assertEquals("Entity Content plus T1", res.getContent());
+            Assertions.assertEquals(1, res.getValue0().getChangesCounter());
+            Assertions.assertEquals("Entity Content plus T1", res.getValue0().getContent());
+            Assertions.assertFalse(res.getValue1());
+            Assertions.assertFalse(res.getValue2());
         }
         {
-            final DemoEntity res = demoConcurrentUpdate(NonVersionedEntity.class, NonVersionedEntity::newEntity,
+            final Triplet<NonVersionedEntity, Boolean, Boolean> res = demoConcurrentUpdate(NonVersionedEntity.class, NonVersionedEntity::newEntity,
                     null, 1250, null, false);
-            Assertions.assertEquals(1, res.getChangesCounter());
-            Assertions.assertEquals("Entity Content plus T2", res.getContent());
+            Assertions.assertEquals(1, res.getValue0().getChangesCounter());
+            Assertions.assertEquals("Entity Content plus T2", res.getValue0().getContent());
+            Assertions.assertFalse(res.getValue1());
+            Assertions.assertFalse(res.getValue2());
         }
         //Versioned: merge the result, in order of transaction close
         {
-            final DemoEntity res = demoConcurrentUpdate(VersionedEntity.class, VersionedEntity::newEntity,
+            final Triplet<VersionedEntity, Boolean, Boolean> res = demoConcurrentUpdate(VersionedEntity.class, VersionedEntity::newEntity,
                     null, 2000, null, false);
-            Assertions.assertEquals(2, res.getChangesCounter());
-            Assertions.assertEquals("Entity Content plus T2 plus T1", res.getContent());
+            Assertions.assertEquals(2, res.getValue0().getChangesCounter());
+            Assertions.assertEquals("Entity Content plus T2 plus T1", res.getValue0().getContent());
+            Assertions.assertFalse(res.getValue1());
+            Assertions.assertFalse(res.getValue2());
         }
         {
-            final DemoEntity res = demoConcurrentUpdate(VersionedEntity.class, VersionedEntity::newEntity,
+            final Triplet<VersionedEntity, Boolean, Boolean> res = demoConcurrentUpdate(VersionedEntity.class, VersionedEntity::newEntity,
                     null, 1250, null, false);
-            Assertions.assertEquals(2, res.getChangesCounter());
-            Assertions.assertEquals("Entity Content plus T1 plus T2", res.getContent());
+            Assertions.assertEquals(2, res.getValue0().getChangesCounter());
+            Assertions.assertEquals("Entity Content plus T1 plus T2", res.getValue0().getContent());
+            Assertions.assertFalse(res.getValue1());
+            Assertions.assertFalse(res.getValue2());
         }
     }
 
@@ -126,29 +138,37 @@ public class ConcurrentUpdates {
     public void lockMode_None() throws InterruptedException {
         //Non versioned:  the last to close wins, overrides the other
         {
-            final DemoEntity res = demoConcurrentUpdate(NonVersionedEntity.class, NonVersionedEntity::newEntity,
+            final Triplet<NonVersionedEntity, Boolean, Boolean> res = demoConcurrentUpdate(NonVersionedEntity.class, NonVersionedEntity::newEntity,
                     LockModeType.NONE, 2000, LockModeType.NONE, false);
-            Assertions.assertEquals(1, res.getChangesCounter());
-            Assertions.assertEquals("Entity Content plus T1", res.getContent());
+            Assertions.assertEquals(1, res.getValue0().getChangesCounter());
+            Assertions.assertEquals("Entity Content plus T1", res.getValue0().getContent());
+            Assertions.assertFalse(res.getValue1());
+            Assertions.assertFalse(res.getValue2());
         }
         {
-            final DemoEntity res = demoConcurrentUpdate(NonVersionedEntity.class, NonVersionedEntity::newEntity,
+            final Triplet<NonVersionedEntity, Boolean, Boolean> res = demoConcurrentUpdate(NonVersionedEntity.class, NonVersionedEntity::newEntity,
                     LockModeType.NONE, 1250, LockModeType.NONE, false);
-            Assertions.assertEquals(1, res.getChangesCounter());
-            Assertions.assertEquals("Entity Content plus T2", res.getContent());
+            Assertions.assertEquals(1, res.getValue0().getChangesCounter());
+            Assertions.assertEquals("Entity Content plus T2", res.getValue0().getContent());
+            Assertions.assertFalse(res.getValue1());
+            Assertions.assertFalse(res.getValue2());
         }
         //Versioned: merge the result, in order of transaction close
         {
-            final DemoEntity res = demoConcurrentUpdate(VersionedEntity.class, VersionedEntity::newEntity,
+            final Triplet<VersionedEntity, Boolean, Boolean> res = demoConcurrentUpdate(VersionedEntity.class, VersionedEntity::newEntity,
                     LockModeType.NONE, 2000, LockModeType.NONE, false);
-            Assertions.assertEquals(2, res.getChangesCounter());
-            Assertions.assertEquals("Entity Content plus T2 plus T1", res.getContent());
+            Assertions.assertEquals(2, res.getValue0().getChangesCounter());
+            Assertions.assertEquals("Entity Content plus T2 plus T1", res.getValue0().getContent());
+            Assertions.assertFalse(res.getValue1());
+            Assertions.assertFalse(res.getValue2());
         }
         {
-            final DemoEntity res = demoConcurrentUpdate(VersionedEntity.class, VersionedEntity::newEntity,
+            final Triplet<VersionedEntity, Boolean, Boolean> res = demoConcurrentUpdate(VersionedEntity.class, VersionedEntity::newEntity,
                     LockModeType.NONE, 1250, LockModeType.NONE, false);
-            Assertions.assertEquals(2, res.getChangesCounter());
-            Assertions.assertEquals("Entity Content plus T1 plus T2", res.getContent());
+            Assertions.assertEquals(2, res.getValue0().getChangesCounter());
+            Assertions.assertEquals("Entity Content plus T1 plus T2", res.getValue0().getContent());
+            Assertions.assertFalse(res.getValue1());
+            Assertions.assertFalse(res.getValue2());
         }
     }
 
@@ -156,23 +176,29 @@ public class ConcurrentUpdates {
     public void lockMode_Optimistic() throws InterruptedException {
         //Non versioned:  both thread fail
         {
-            final DemoEntity res = demoConcurrentUpdate(NonVersionedEntity.class, NonVersionedEntity::newEntity,
+            final Triplet<NonVersionedEntity, Boolean, Boolean> res = demoConcurrentUpdate(NonVersionedEntity.class, NonVersionedEntity::newEntity,
                     LockModeType.OPTIMISTIC, 2000, LockModeType.OPTIMISTIC, false);
-            Assertions.assertEquals(0, res.getChangesCounter());
-            Assertions.assertEquals("Entity Content", res.getContent());
+            Assertions.assertEquals(0, res.getValue0().getChangesCounter());
+            Assertions.assertEquals("Entity Content", res.getValue0().getContent());
+            Assertions.assertTrue(res.getValue1());
+            Assertions.assertTrue(res.getValue2());
         }
         //Versioned: merge the result, in order of transaction close
         {
-            final DemoEntity res = demoConcurrentUpdate(VersionedEntity.class, VersionedEntity::newEntity,
+            final Triplet<VersionedEntity, Boolean, Boolean> res = demoConcurrentUpdate(VersionedEntity.class, VersionedEntity::newEntity,
                     LockModeType.NONE, 2000, LockModeType.OPTIMISTIC, false);
-            Assertions.assertEquals(2, res.getChangesCounter());
-            Assertions.assertEquals("Entity Content plus T2 plus T1", res.getContent());
+            Assertions.assertEquals(2, res.getValue0().getChangesCounter());
+            Assertions.assertEquals("Entity Content plus T2 plus T1", res.getValue0().getContent());
+            Assertions.assertFalse(res.getValue1());
+            Assertions.assertFalse(res.getValue2());
         }
         {
-            final DemoEntity res = demoConcurrentUpdate(VersionedEntity.class, VersionedEntity::newEntity,
+            final Triplet<VersionedEntity, Boolean, Boolean> res = demoConcurrentUpdate(VersionedEntity.class, VersionedEntity::newEntity,
                     LockModeType.NONE, 1250, LockModeType.OPTIMISTIC, false);
-            Assertions.assertEquals(2, res.getChangesCounter());
-            Assertions.assertEquals("Entity Content plus T1 plus T2", res.getContent());
+            Assertions.assertEquals(2, res.getValue0().getChangesCounter());
+            Assertions.assertEquals("Entity Content plus T1 plus T2", res.getValue0().getContent());
+            Assertions.assertFalse(res.getValue1());
+            Assertions.assertFalse(res.getValue2());
         }
     }
 
@@ -180,29 +206,37 @@ public class ConcurrentUpdates {
     public void lockMode_PessimisticWrite() throws InterruptedException {
         //Non versioned: Merge in locking order
         {
-            final DemoEntity res = demoConcurrentUpdate(NonVersionedEntity.class, NonVersionedEntity::newEntity,
+            final Triplet<NonVersionedEntity, Boolean, Boolean> res = demoConcurrentUpdate(NonVersionedEntity.class, NonVersionedEntity::newEntity,
                     LockModeType.PESSIMISTIC_WRITE, 2000, LockModeType.PESSIMISTIC_WRITE, false);
-            Assertions.assertEquals(2, res.getChangesCounter());
-            Assertions.assertEquals("Entity Content plus T1 plus T2", res.getContent());
+            Assertions.assertEquals(2, res.getValue0().getChangesCounter());
+            Assertions.assertEquals("Entity Content plus T1 plus T2", res.getValue0().getContent());
+            Assertions.assertFalse(res.getValue1());
+            Assertions.assertFalse(res.getValue2());
         }
         {
-            final DemoEntity res = demoConcurrentUpdate(NonVersionedEntity.class, NonVersionedEntity::newEntity,
+            final Triplet<NonVersionedEntity, Boolean, Boolean> res = demoConcurrentUpdate(NonVersionedEntity.class, NonVersionedEntity::newEntity,
                     LockModeType.PESSIMISTIC_WRITE, 1250, LockModeType.PESSIMISTIC_WRITE, false);
-            Assertions.assertEquals(2, res.getChangesCounter());
-            Assertions.assertEquals("Entity Content plus T1 plus T2", res.getContent());
+            Assertions.assertEquals(2, res.getValue0().getChangesCounter());
+            Assertions.assertEquals("Entity Content plus T1 plus T2", res.getValue0().getContent());
+            Assertions.assertFalse(res.getValue1());
+            Assertions.assertFalse(res.getValue2());
         }
         //Versioned: Merge in locking order
         {
-            final DemoEntity res = demoConcurrentUpdate(VersionedEntity.class, VersionedEntity::newEntity,
+            final Triplet<VersionedEntity, Boolean, Boolean> res = demoConcurrentUpdate(VersionedEntity.class, VersionedEntity::newEntity,
                     LockModeType.PESSIMISTIC_WRITE, 2000, LockModeType.PESSIMISTIC_WRITE, false);
-            Assertions.assertEquals(2, res.getChangesCounter());
-            Assertions.assertEquals("Entity Content plus T1 plus T2", res.getContent());
+            Assertions.assertEquals(2, res.getValue0().getChangesCounter());
+            Assertions.assertEquals("Entity Content plus T1 plus T2", res.getValue0().getContent());
+            Assertions.assertFalse(res.getValue1());
+            Assertions.assertFalse(res.getValue2());
         }
         {
-            final DemoEntity res = demoConcurrentUpdate(VersionedEntity.class, VersionedEntity::newEntity,
+            final Triplet<VersionedEntity, Boolean, Boolean> res = demoConcurrentUpdate(VersionedEntity.class, VersionedEntity::newEntity,
                     LockModeType.PESSIMISTIC_WRITE, 1250, LockModeType.PESSIMISTIC_WRITE, false);
-            Assertions.assertEquals(2, res.getChangesCounter());
-            Assertions.assertEquals("Entity Content plus T1 plus T2", res.getContent());
+            Assertions.assertEquals(2, res.getValue0().getChangesCounter());
+            Assertions.assertEquals("Entity Content plus T1 plus T2", res.getValue0().getContent());
+            Assertions.assertFalse(res.getValue1());
+            Assertions.assertFalse(res.getValue2());
         }
     }
 
@@ -210,29 +244,37 @@ public class ConcurrentUpdates {
     public void lockMode_PessimisticWrite_NullRead() throws InterruptedException {
         //Non versioned: T1 is ignored completely
         {
-            final DemoEntity res = demoConcurrentUpdate(NonVersionedEntity.class, NonVersionedEntity::newEntity,
+            final Triplet<NonVersionedEntity, Boolean, Boolean> res = demoConcurrentUpdate(NonVersionedEntity.class, NonVersionedEntity::newEntity,
                     LockModeType.PESSIMISTIC_WRITE, 2000, null, false);
-            Assertions.assertEquals(1, res.getChangesCounter());
-            Assertions.assertEquals("Entity Content plus T2", res.getContent());
+            Assertions.assertEquals(1, res.getValue0().getChangesCounter());
+            Assertions.assertEquals("Entity Content plus T2", res.getValue0().getContent());
+            Assertions.assertFalse(res.getValue1());
+            Assertions.assertFalse(res.getValue2());
         }
         {
-            final DemoEntity res = demoConcurrentUpdate(NonVersionedEntity.class, NonVersionedEntity::newEntity,
+            final Triplet<NonVersionedEntity, Boolean, Boolean> res = demoConcurrentUpdate(NonVersionedEntity.class, NonVersionedEntity::newEntity,
                     LockModeType.PESSIMISTIC_WRITE, 1250, null, false);
-            Assertions.assertEquals(1, res.getChangesCounter());
-            Assertions.assertEquals("Entity Content plus T2", res.getContent());
+            Assertions.assertEquals(1, res.getValue0().getChangesCounter());
+            Assertions.assertEquals("Entity Content plus T2", res.getValue0().getContent());
+            Assertions.assertFalse(res.getValue1());
+            Assertions.assertFalse(res.getValue2());
         }
         //Versioned: Merge in locking order
         {
-            final DemoEntity res = demoConcurrentUpdate(VersionedEntity.class, VersionedEntity::newEntity,
+            final Triplet<VersionedEntity, Boolean, Boolean> res = demoConcurrentUpdate(VersionedEntity.class, VersionedEntity::newEntity,
                     LockModeType.PESSIMISTIC_WRITE, 2000, null, false);
-            Assertions.assertEquals(2, res.getChangesCounter());
-            Assertions.assertEquals("Entity Content plus T1 plus T2", res.getContent());
+            Assertions.assertEquals(2, res.getValue0().getChangesCounter());
+            Assertions.assertEquals("Entity Content plus T1 plus T2", res.getValue0().getContent());
+            Assertions.assertFalse(res.getValue1());
+            Assertions.assertFalse(res.getValue2());
         }
         {
-            final DemoEntity res = demoConcurrentUpdate(VersionedEntity.class, VersionedEntity::newEntity,
+            final Triplet<VersionedEntity, Boolean, Boolean> res = demoConcurrentUpdate(VersionedEntity.class, VersionedEntity::newEntity,
                     LockModeType.PESSIMISTIC_WRITE, 1250, null, false);
-            Assertions.assertEquals(2, res.getChangesCounter());
-            Assertions.assertEquals("Entity Content plus T1 plus T2", res.getContent());
+            Assertions.assertEquals(2, res.getValue0().getChangesCounter());
+            Assertions.assertEquals("Entity Content plus T1 plus T2", res.getValue0().getContent());
+            Assertions.assertFalse(res.getValue1());
+            Assertions.assertFalse(res.getValue2());
         }
     }
 
@@ -240,29 +282,37 @@ public class ConcurrentUpdates {
     public void lockMode_PessimisticWrite_PessimisticRead() throws InterruptedException {
         //Non versioned: Merge in locking order
         {
-            final DemoEntity res = demoConcurrentUpdate(NonVersionedEntity.class, NonVersionedEntity::newEntity,
+            final Triplet<NonVersionedEntity, Boolean, Boolean> res = demoConcurrentUpdate(NonVersionedEntity.class, NonVersionedEntity::newEntity,
                     LockModeType.PESSIMISTIC_WRITE, 2000, LockModeType.PESSIMISTIC_READ, false);
-            Assertions.assertEquals(2, res.getChangesCounter());
-            Assertions.assertEquals("Entity Content plus T1 plus T2", res.getContent());
+            Assertions.assertEquals(2, res.getValue0().getChangesCounter());
+            Assertions.assertEquals("Entity Content plus T1 plus T2", res.getValue0().getContent());
+            Assertions.assertFalse(res.getValue1());
+            Assertions.assertFalse(res.getValue2());
         }
         {
-            final DemoEntity res = demoConcurrentUpdate(NonVersionedEntity.class, NonVersionedEntity::newEntity,
+            final Triplet<NonVersionedEntity, Boolean, Boolean> res = demoConcurrentUpdate(NonVersionedEntity.class, NonVersionedEntity::newEntity,
                     LockModeType.PESSIMISTIC_WRITE, 1250, LockModeType.PESSIMISTIC_READ, false);
-            Assertions.assertEquals(2, res.getChangesCounter());
-            Assertions.assertEquals("Entity Content plus T1 plus T2", res.getContent());
+            Assertions.assertEquals(2, res.getValue0().getChangesCounter());
+            Assertions.assertEquals("Entity Content plus T1 plus T2", res.getValue0().getContent());
+            Assertions.assertFalse(res.getValue1());
+            Assertions.assertFalse(res.getValue2());
         }
         //Versioned: Merge in locking order
         {
-            final DemoEntity res = demoConcurrentUpdate(VersionedEntity.class, VersionedEntity::newEntity,
+            final Triplet<VersionedEntity, Boolean, Boolean> res = demoConcurrentUpdate(VersionedEntity.class, VersionedEntity::newEntity,
                     LockModeType.PESSIMISTIC_WRITE, 2000, LockModeType.PESSIMISTIC_READ, false);
-            Assertions.assertEquals(2, res.getChangesCounter());
-            Assertions.assertEquals("Entity Content plus T1 plus T2", res.getContent());
+            Assertions.assertEquals(2, res.getValue0().getChangesCounter());
+            Assertions.assertEquals("Entity Content plus T1 plus T2", res.getValue0().getContent());
+            Assertions.assertFalse(res.getValue1());
+            Assertions.assertFalse(res.getValue2());
         }
         {
-            final DemoEntity res = demoConcurrentUpdate(VersionedEntity.class, VersionedEntity::newEntity,
+            final Triplet<VersionedEntity, Boolean, Boolean> res = demoConcurrentUpdate(VersionedEntity.class, VersionedEntity::newEntity,
                     LockModeType.PESSIMISTIC_WRITE, 1250, LockModeType.PESSIMISTIC_READ, false);
-            Assertions.assertEquals(2, res.getChangesCounter());
-            Assertions.assertEquals("Entity Content plus T1 plus T2", res.getContent());
+            Assertions.assertEquals(2, res.getValue0().getChangesCounter());
+            Assertions.assertEquals("Entity Content plus T1 plus T2", res.getValue0().getContent());
+            Assertions.assertFalse(res.getValue1());
+            Assertions.assertFalse(res.getValue2());
         }
     }
 
@@ -271,29 +321,37 @@ public class ConcurrentUpdates {
     public void lockMode_Null_withT1Throwing() throws InterruptedException {
         //Non Versioned: T2 passes
         {
-            final DemoEntity res = demoConcurrentUpdate(NonVersionedEntity.class, NonVersionedEntity::newEntity,
+            final Triplet<NonVersionedEntity, Boolean, Boolean> res = demoConcurrentUpdate(NonVersionedEntity.class, NonVersionedEntity::newEntity,
                     null, 2000, null, true);
-            Assertions.assertEquals(1, res.getChangesCounter());
-            Assertions.assertEquals("Entity Content plus T2", res.getContent());
+            Assertions.assertEquals(1, res.getValue0().getChangesCounter());
+            Assertions.assertEquals("Entity Content plus T2", res.getValue0().getContent());
+            Assertions.assertTrue(res.getValue1());
+            Assertions.assertFalse(res.getValue2());
         }
         {
-            final DemoEntity res = demoConcurrentUpdate(NonVersionedEntity.class, NonVersionedEntity::newEntity,
+            final Triplet<NonVersionedEntity, Boolean, Boolean> res = demoConcurrentUpdate(NonVersionedEntity.class, NonVersionedEntity::newEntity,
                     null, 1250, null, true);
-            Assertions.assertEquals(1, res.getChangesCounter());
-            Assertions.assertEquals("Entity Content plus T2", res.getContent());
+            Assertions.assertEquals(1, res.getValue0().getChangesCounter());
+            Assertions.assertEquals("Entity Content plus T2", res.getValue0().getContent());
+            Assertions.assertTrue(res.getValue1());
+            Assertions.assertFalse(res.getValue2());
         }
         //Versioned: T2 passes
         {
-            final DemoEntity res = demoConcurrentUpdate(VersionedEntity.class, VersionedEntity::newEntity,
+            final Triplet<VersionedEntity, Boolean, Boolean> res = demoConcurrentUpdate(VersionedEntity.class, VersionedEntity::newEntity,
                     null, 2000, null, true);
-            Assertions.assertEquals(1, res.getChangesCounter());
-            Assertions.assertEquals("Entity Content plus T2", res.getContent());
+            Assertions.assertEquals(1, res.getValue0().getChangesCounter());
+            Assertions.assertEquals("Entity Content plus T2", res.getValue0().getContent());
+            Assertions.assertTrue(res.getValue1());
+            Assertions.assertFalse(res.getValue2());
         }
         {
-            final DemoEntity res = demoConcurrentUpdate(VersionedEntity.class, VersionedEntity::newEntity,
+            final Triplet<VersionedEntity, Boolean, Boolean> res = demoConcurrentUpdate(VersionedEntity.class, VersionedEntity::newEntity,
                     null, 1250, null, true);
-            Assertions.assertEquals(1, res.getChangesCounter());
-            Assertions.assertEquals("Entity Content plus T2", res.getContent());
+            Assertions.assertEquals(1, res.getValue0().getChangesCounter());
+            Assertions.assertEquals("Entity Content plus T2", res.getValue0().getContent());
+            Assertions.assertTrue(res.getValue1());
+            Assertions.assertFalse(res.getValue2());
         }
     }
 
@@ -301,29 +359,37 @@ public class ConcurrentUpdates {
     public void lockMode_None_withT1Throwing() throws InterruptedException {
         //Non Versioned: T2 passes
         {
-            final DemoEntity res = demoConcurrentUpdate(NonVersionedEntity.class, NonVersionedEntity::newEntity,
+            final Triplet<NonVersionedEntity, Boolean, Boolean> res = demoConcurrentUpdate(NonVersionedEntity.class, NonVersionedEntity::newEntity,
                     LockModeType.NONE, 2000, LockModeType.NONE, true);
-            Assertions.assertEquals(1, res.getChangesCounter());
-            Assertions.assertEquals("Entity Content plus T2", res.getContent());
+            Assertions.assertEquals(1, res.getValue0().getChangesCounter());
+            Assertions.assertEquals("Entity Content plus T2", res.getValue0().getContent());
+            Assertions.assertTrue(res.getValue1());
+            Assertions.assertFalse(res.getValue2());
         }
         {
-            final DemoEntity res = demoConcurrentUpdate(NonVersionedEntity.class, NonVersionedEntity::newEntity,
+            final Triplet<NonVersionedEntity, Boolean, Boolean> res = demoConcurrentUpdate(NonVersionedEntity.class, NonVersionedEntity::newEntity,
                     LockModeType.NONE, 1250, LockModeType.NONE, true);
-            Assertions.assertEquals(1, res.getChangesCounter());
-            Assertions.assertEquals("Entity Content plus T2", res.getContent());
+            Assertions.assertEquals(1, res.getValue0().getChangesCounter());
+            Assertions.assertEquals("Entity Content plus T2", res.getValue0().getContent());
+            Assertions.assertTrue(res.getValue1());
+            Assertions.assertFalse(res.getValue2());
         }
         //Versioned: T2 passes
         {
-            final DemoEntity res = demoConcurrentUpdate(VersionedEntity.class, VersionedEntity::newEntity,
+            final Triplet<VersionedEntity, Boolean, Boolean> res = demoConcurrentUpdate(VersionedEntity.class, VersionedEntity::newEntity,
                     LockModeType.NONE, 2000, LockModeType.NONE, true);
-            Assertions.assertEquals(1, res.getChangesCounter());
-            Assertions.assertEquals("Entity Content plus T2", res.getContent());
+            Assertions.assertEquals(1, res.getValue0().getChangesCounter());
+            Assertions.assertEquals("Entity Content plus T2", res.getValue0().getContent());
+            Assertions.assertTrue(res.getValue1());
+            Assertions.assertFalse(res.getValue2());
         }
         {
-            final DemoEntity res = demoConcurrentUpdate(VersionedEntity.class, VersionedEntity::newEntity,
+            final Triplet<VersionedEntity, Boolean, Boolean> res = demoConcurrentUpdate(VersionedEntity.class, VersionedEntity::newEntity,
                     LockModeType.NONE, 1250, LockModeType.NONE, true);
-            Assertions.assertEquals(1, res.getChangesCounter());
-            Assertions.assertEquals("Entity Content plus T2", res.getContent());
+            Assertions.assertEquals(1, res.getValue0().getChangesCounter());
+            Assertions.assertEquals("Entity Content plus T2", res.getValue0().getContent());
+            Assertions.assertTrue(res.getValue1());
+            Assertions.assertFalse(res.getValue2());
         }
     }
 
@@ -331,17 +397,21 @@ public class ConcurrentUpdates {
     public void lockMode_Optimistic_withT1Throwing() throws InterruptedException {
         //Non versioned:  both thread fail
         {
-            final DemoEntity res = demoConcurrentUpdate(NonVersionedEntity.class, NonVersionedEntity::newEntity,
+            final Triplet<NonVersionedEntity, Boolean, Boolean> res = demoConcurrentUpdate(NonVersionedEntity.class, NonVersionedEntity::newEntity,
                     LockModeType.OPTIMISTIC, 2000, LockModeType.OPTIMISTIC, true);
-            Assertions.assertEquals(0, res.getChangesCounter());
-            Assertions.assertEquals("Entity Content", res.getContent());
+            Assertions.assertEquals(0, res.getValue0().getChangesCounter());
+            Assertions.assertEquals("Entity Content", res.getValue0().getContent());
+            Assertions.assertTrue(res.getValue1());
+            Assertions.assertTrue(res.getValue2());
         }
         //Versioned: T2 passes
         {
-            final DemoEntity res = demoConcurrentUpdate(VersionedEntity.class, VersionedEntity::newEntity,
+            final Triplet<VersionedEntity, Boolean, Boolean> res = demoConcurrentUpdate(VersionedEntity.class, VersionedEntity::newEntity,
                     LockModeType.OPTIMISTIC, 2000, LockModeType.OPTIMISTIC, true);
-            Assertions.assertEquals(1, res.getChangesCounter());
-            Assertions.assertEquals("Entity Content plus T2", res.getContent());
+            Assertions.assertEquals(1, res.getValue0().getChangesCounter());
+            Assertions.assertEquals("Entity Content plus T2", res.getValue0().getContent());
+            Assertions.assertTrue(res.getValue1());
+            Assertions.assertFalse(res.getValue2());
         }
     }
 
@@ -349,29 +419,37 @@ public class ConcurrentUpdates {
     public void lockMode_PessimisticWrite_withT1Throwing() throws InterruptedException {
         //Non versioned:  both thread fail
         {
-            final DemoEntity res = demoConcurrentUpdate(NonVersionedEntity.class, NonVersionedEntity::newEntity,
+            final Triplet<NonVersionedEntity, Boolean, Boolean> res = demoConcurrentUpdate(NonVersionedEntity.class, NonVersionedEntity::newEntity,
                     LockModeType.PESSIMISTIC_WRITE, 2000, LockModeType.PESSIMISTIC_WRITE, true);
-            Assertions.assertEquals(1, res.getChangesCounter());
-            Assertions.assertEquals("Entity Content plus T2", res.getContent());
+            Assertions.assertEquals(1, res.getValue0().getChangesCounter());
+            Assertions.assertEquals("Entity Content plus T2", res.getValue0().getContent());
+            Assertions.assertTrue(res.getValue1());
+            Assertions.assertFalse(res.getValue2());
         }
         {
-            final DemoEntity res = demoConcurrentUpdate(NonVersionedEntity.class, NonVersionedEntity::newEntity,
+            final Triplet<NonVersionedEntity, Boolean, Boolean> res = demoConcurrentUpdate(NonVersionedEntity.class, NonVersionedEntity::newEntity,
                     LockModeType.PESSIMISTIC_WRITE, 1250, LockModeType.PESSIMISTIC_WRITE, true);
-            Assertions.assertEquals(1, res.getChangesCounter());
-            Assertions.assertEquals("Entity Content plus T2", res.getContent());
+            Assertions.assertEquals(1, res.getValue0().getChangesCounter());
+            Assertions.assertEquals("Entity Content plus T2", res.getValue0().getContent());
+            Assertions.assertTrue(res.getValue1());
+            Assertions.assertFalse(res.getValue2());
         }
         //Versioned: T2 passes
         {
-            final DemoEntity res = demoConcurrentUpdate(VersionedEntity.class, VersionedEntity::newEntity,
+            final Triplet<VersionedEntity, Boolean, Boolean> res = demoConcurrentUpdate(VersionedEntity.class, VersionedEntity::newEntity,
                     LockModeType.PESSIMISTIC_WRITE, 2000, LockModeType.PESSIMISTIC_WRITE, true);
-            Assertions.assertEquals(1, res.getChangesCounter());
-            Assertions.assertEquals("Entity Content plus T2", res.getContent());
+            Assertions.assertEquals(1, res.getValue0().getChangesCounter());
+            Assertions.assertEquals("Entity Content plus T2", res.getValue0().getContent());
+            Assertions.assertTrue(res.getValue1());
+            Assertions.assertFalse(res.getValue2());
         }
         {
-            final DemoEntity res = demoConcurrentUpdate(VersionedEntity.class, VersionedEntity::newEntity,
+            final Triplet<VersionedEntity, Boolean, Boolean> res = demoConcurrentUpdate(VersionedEntity.class, VersionedEntity::newEntity,
                     LockModeType.PESSIMISTIC_WRITE, 1250, LockModeType.PESSIMISTIC_WRITE, true);
-            Assertions.assertEquals(1, res.getChangesCounter());
-            Assertions.assertEquals("Entity Content plus T2", res.getContent());
+            Assertions.assertEquals(1, res.getValue0().getChangesCounter());
+            Assertions.assertEquals("Entity Content plus T2", res.getValue0().getContent());
+            Assertions.assertTrue(res.getValue1());
+            Assertions.assertFalse(res.getValue2());
         }
     }
 
@@ -379,29 +457,37 @@ public class ConcurrentUpdates {
     public void lockMode_PessimisticWrite_NullRead_withT1Throwing() throws InterruptedException {
         //Non versioned: T2 passes
         {
-            final DemoEntity res = demoConcurrentUpdate(NonVersionedEntity.class, NonVersionedEntity::newEntity,
+            final Triplet<NonVersionedEntity, Boolean, Boolean> res = demoConcurrentUpdate(NonVersionedEntity.class, NonVersionedEntity::newEntity,
                     LockModeType.PESSIMISTIC_WRITE, 2000, null, true);
-            Assertions.assertEquals(1, res.getChangesCounter());
-            Assertions.assertEquals("Entity Content plus T2", res.getContent());
+            Assertions.assertEquals(1, res.getValue0().getChangesCounter());
+            Assertions.assertEquals("Entity Content plus T2", res.getValue0().getContent());
+            Assertions.assertTrue(res.getValue1());
+            Assertions.assertFalse(res.getValue2());
         }
         {
-            final DemoEntity res = demoConcurrentUpdate(NonVersionedEntity.class, NonVersionedEntity::newEntity,
+            final Triplet<NonVersionedEntity, Boolean, Boolean> res = demoConcurrentUpdate(NonVersionedEntity.class, NonVersionedEntity::newEntity,
                     LockModeType.PESSIMISTIC_WRITE, 1250, null, true);
-            Assertions.assertEquals(1, res.getChangesCounter());
-            Assertions.assertEquals("Entity Content plus T2", res.getContent());
+            Assertions.assertEquals(1, res.getValue0().getChangesCounter());
+            Assertions.assertEquals("Entity Content plus T2", res.getValue0().getContent());
+            Assertions.assertTrue(res.getValue1());
+            Assertions.assertFalse(res.getValue2());
         }
         //Versioned: T2 passes
         {
-            final DemoEntity res = demoConcurrentUpdate(VersionedEntity.class, VersionedEntity::newEntity,
+            final Triplet<VersionedEntity, Boolean, Boolean> res = demoConcurrentUpdate(VersionedEntity.class, VersionedEntity::newEntity,
                     LockModeType.PESSIMISTIC_WRITE, 2000, null, true);
-            Assertions.assertEquals(1, res.getChangesCounter());
-            Assertions.assertEquals("Entity Content plus T2", res.getContent());
+            Assertions.assertEquals(1, res.getValue0().getChangesCounter());
+            Assertions.assertEquals("Entity Content plus T2", res.getValue0().getContent());
+            Assertions.assertTrue(res.getValue1());
+            Assertions.assertFalse(res.getValue2());
         }
         {
-            final DemoEntity res = demoConcurrentUpdate(VersionedEntity.class, VersionedEntity::newEntity,
+            final Triplet<VersionedEntity, Boolean, Boolean> res = demoConcurrentUpdate(VersionedEntity.class, VersionedEntity::newEntity,
                     LockModeType.PESSIMISTIC_WRITE, 1250, null, true);
-            Assertions.assertEquals(1, res.getChangesCounter());
-            Assertions.assertEquals("Entity Content plus T2", res.getContent());
+            Assertions.assertEquals(1, res.getValue0().getChangesCounter());
+            Assertions.assertEquals("Entity Content plus T2", res.getValue0().getContent());
+            Assertions.assertTrue(res.getValue1());
+            Assertions.assertFalse(res.getValue2());
         }
     }
 
@@ -409,29 +495,37 @@ public class ConcurrentUpdates {
     public void lockMode_PessimisticWrite_PessimisticRead_withT1Throwing() throws InterruptedException {
         //Non versioned: T2 passes
         {
-            final DemoEntity res = demoConcurrentUpdate(NonVersionedEntity.class, NonVersionedEntity::newEntity,
+            final Triplet<NonVersionedEntity, Boolean, Boolean> res = demoConcurrentUpdate(NonVersionedEntity.class, NonVersionedEntity::newEntity,
                     LockModeType.PESSIMISTIC_WRITE, 2000, LockModeType.PESSIMISTIC_READ, true);
-            Assertions.assertEquals(1, res.getChangesCounter());
-            Assertions.assertEquals("Entity Content plus T2", res.getContent());
+            Assertions.assertEquals(1, res.getValue0().getChangesCounter());
+            Assertions.assertEquals("Entity Content plus T2", res.getValue0().getContent());
+            Assertions.assertTrue(res.getValue1());
+            Assertions.assertFalse(res.getValue2());
         }
         {
-            final DemoEntity res = demoConcurrentUpdate(NonVersionedEntity.class, NonVersionedEntity::newEntity,
+            final Triplet<NonVersionedEntity, Boolean, Boolean> res = demoConcurrentUpdate(NonVersionedEntity.class, NonVersionedEntity::newEntity,
                     LockModeType.PESSIMISTIC_WRITE, 1250, LockModeType.PESSIMISTIC_READ, true);
-            Assertions.assertEquals(1, res.getChangesCounter());
-            Assertions.assertEquals("Entity Content plus T2", res.getContent());
+            Assertions.assertEquals(1, res.getValue0().getChangesCounter());
+            Assertions.assertEquals("Entity Content plus T2", res.getValue0().getContent());
+            Assertions.assertTrue(res.getValue1());
+            Assertions.assertFalse(res.getValue2());
         }
         //Versioned: T2 passes
         {
-            final DemoEntity res = demoConcurrentUpdate(VersionedEntity.class, VersionedEntity::newEntity,
+            final Triplet<VersionedEntity, Boolean, Boolean> res = demoConcurrentUpdate(VersionedEntity.class, VersionedEntity::newEntity,
                     LockModeType.PESSIMISTIC_WRITE, 2000, LockModeType.PESSIMISTIC_READ, true);
-            Assertions.assertEquals(1, res.getChangesCounter());
-            Assertions.assertEquals("Entity Content plus T2", res.getContent());
+            Assertions.assertEquals(1, res.getValue0().getChangesCounter());
+            Assertions.assertEquals("Entity Content plus T2", res.getValue0().getContent());
+            Assertions.assertTrue(res.getValue1());
+            Assertions.assertFalse(res.getValue2());
         }
         {
-            final DemoEntity res = demoConcurrentUpdate(VersionedEntity.class, VersionedEntity::newEntity,
+            final Triplet<VersionedEntity, Boolean, Boolean> res = demoConcurrentUpdate(VersionedEntity.class, VersionedEntity::newEntity,
                     LockModeType.PESSIMISTIC_WRITE, 1250, LockModeType.PESSIMISTIC_READ, true);
-            Assertions.assertEquals(1, res.getChangesCounter());
-            Assertions.assertEquals("Entity Content plus T2", res.getContent());
+            Assertions.assertEquals(1, res.getValue0().getChangesCounter());
+            Assertions.assertEquals("Entity Content plus T2", res.getValue0().getContent());
+            Assertions.assertTrue(res.getValue1());
+            Assertions.assertFalse(res.getValue2());
         }
     }
 }

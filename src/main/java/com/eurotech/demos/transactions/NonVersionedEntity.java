@@ -9,12 +9,10 @@ import javax.persistence.PreUpdate;
 @Entity
 public class NonVersionedEntity implements DemoEntity {
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @GeneratedValue(strategy = GenerationType.AUTO)
     Long id;
     String content;
     int changesCounter = 0;
-//    @Version
-//    private Integer version;
 
     @Override
     public Long getId() {

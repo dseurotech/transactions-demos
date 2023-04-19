@@ -56,6 +56,27 @@ public class DemoEntityRepository<E extends DemoEntity> {
         return Optional.ofNullable(em.find(clazz, entityId));
     }
 
+    public E delete(TxContext txContext, long entityId) {
+        final EntityManager em = JpaAwareTxContext.extractEntityManager(txContext);
+        // Checking existence
+        return doFind(em, entityId)
+                // Deleting if found
+                .map(e -> doDelete(em, e))
+                .orElseThrow(() -> new EntityNotFoundException(Long.toString(entityId)));
+    }
+
+
+    public E delete(TxContext txContext, E entityToDelete) {
+        final EntityManager em = JpaAwareTxContext.extractEntityManager(txContext);
+        return doDelete(em, entityToDelete);
+    }
+
+    protected E doDelete(EntityManager em, E entityToDelete) {
+        em.remove(entityToDelete);
+        em.flush();
+        // Returning deleted entity
+        return entityToDelete;
+    }
 
     public static boolean isInsertConstraintViolation(PersistenceException persistenceException) {
         Throwable cause = persistenceException.getCause();

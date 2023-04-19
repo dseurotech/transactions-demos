@@ -7,7 +7,7 @@ import javax.persistence.LockModeType;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 
-public class Updater<E extends DemoEntity> extends Thread {
+public class Deleter<E extends DemoEntity> extends Thread {
     private final String threadName;
     private final Class<E> clazz;
     private final Supplier<TxManager> txManagerSupplier;
@@ -19,44 +19,40 @@ public class Updater<E extends DemoEntity> extends Thread {
     private final DemoEntityRepository demoEntityRepository;
     public final AtomicBoolean threadFailed = new AtomicBoolean(false);
 
-    public Updater(
+    public Deleter(
             String threadName,
             Class<E> clazz,
             Supplier<TxManager> txManagerSupplier,
-            Long idToUpdate,
+            Long idToDelete,
             LockModeType readLockModeType,
             int sleepBetweenReadAndUpdateMs,
-            LockModeType preUpdateLockModeType,
-            boolean throwAfterUpdate,
+            LockModeType preDeleteLockModeType,
+            boolean throwAfterDelete,
             DemoEntityRepository demoEntityRepository) {
         this.threadName = threadName;
         this.clazz = clazz;
         this.txManagerSupplier = txManagerSupplier;
-        this.idToUpdate = idToUpdate;
+        this.idToUpdate = idToDelete;
         this.readLockModeType = readLockModeType;
         this.sleepBetweenReadAndUpdateMs = sleepBetweenReadAndUpdateMs;
-        this.preUpdateLockModeType = preUpdateLockModeType;
-        this.throwAfterUpdate = throwAfterUpdate;
+        this.preUpdateLockModeType = preDeleteLockModeType;
+        this.throwAfterUpdate = throwAfterDelete;
         this.demoEntityRepository = demoEntityRepository;
     }
 
     @Override
     public void run() {
         try {
+
+
             Utils.print(threadName, "started");
             txManagerSupplier.get().execute(tx -> {
                 final DemoEntity entity = Utils.fetchAndPrint(tx, clazz, threadName, idToUpdate, readLockModeType);
 
                 Utils.sleep(sleepBetweenReadAndUpdateMs);
-                if (entity == null) {
-                    Utils.print(threadName, "notices null entity and exits");
-                    return null;
-                }
 
-                entity.setContent(entity.getContent() + " plus " + threadName);
-                //Completely superfluous
-                demoEntityRepository.update(tx, entity);
-                Utils.print(threadName, "changed entity content");
+                demoEntityRepository.delete(tx, entity);
+                Utils.print(threadName, "deleted the entity");
 
                 final E res = Utils.fetchAndPrint(tx, clazz, threadName, idToUpdate, readLockModeType);
                 if (throwAfterUpdate) {
