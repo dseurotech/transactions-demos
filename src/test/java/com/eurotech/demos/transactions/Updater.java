@@ -55,7 +55,7 @@ public class Updater<E extends DemoEntity> extends Thread {
 
                 entity.setContent(entity.getContent() + " plus " + threadName);
                 //Completely superfluous
-                demoEntityRepository.update(tx, entity);
+                demoEntityRepository.update(tx, entity, readLockModeType);
                 Utils.print(threadName, "changed entity content");
 
                 final E res = Utils.fetchAndPrint(tx, clazz, threadName, idToUpdate, readLockModeType);
@@ -66,6 +66,7 @@ public class Updater<E extends DemoEntity> extends Thread {
                 return res;
             });
         } catch (Throwable t) {
+            Utils.print(threadName, "failed");
             this.threadFailed.set(true);
         }
     }

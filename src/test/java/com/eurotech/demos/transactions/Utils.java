@@ -1,9 +1,8 @@
 package com.eurotech.demos.transactions;
 
+import com.eurotech.persistence.repositories.DemoEntityRepository;
 import com.eurotech.persistence.transactions.TxContext;
-import com.eurotech.persistence.transactions.jpa.JpaAwareTxContext;
 
-import javax.persistence.EntityManager;
 import javax.persistence.LockModeType;
 import java.time.Instant;
 import java.time.ZoneId;
@@ -26,8 +25,7 @@ public class Utils {
     }
 
     protected static <E extends DemoEntity> E fetchAndPrint(TxContext tx, Class<E> clazz, String thread, Long id, LockModeType lockModeType) {
-        final EntityManager em = JpaAwareTxContext.extractEntityManager(tx);
-        final E found = em.find(clazz, id, lockModeType);
+        final E found = new DemoEntityRepository<>(clazz).find(tx, id, lockModeType).orElse(null);
         print(thread, found);
         return found;
     }

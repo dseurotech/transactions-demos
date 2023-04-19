@@ -1,8 +1,7 @@
 package com.eurotech.demos.transactionsless;
 
 import com.eurotech.demos.transactions.DemoEntity;
-import com.eurotech.demos.transactions.NonVersionedEntity;
-import org.eclipse.kapua.commons.jpa.DemoDAO;
+import org.eclipse.kapua.commons.jpa.DemoEntityDAO;
 import org.eclipse.kapua.commons.jpa.EntityManagerSession;
 
 import java.time.Instant;
@@ -25,15 +24,8 @@ public class Utils {
         }
     }
 
-    protected static DemoEntity createEntity(EntityManagerSession ems, String content) {
-        // create new demoEntity
-        final DemoEntity demoEntity = new NonVersionedEntity();
-        demoEntity.setContent(content);
-        return ems.doTransactedAction(e -> DemoDAO.create(e, demoEntity));
-    }
-
-    protected static DemoEntity fetchAndPrint(EntityManagerSession ems, String thread, Long id) {
-        final DemoEntity found = ems.doAction(e -> DemoDAO.find(e, id));
+    protected static <E extends DemoEntity> DemoEntity fetchAndPrint(EntityManagerSession ems, DemoEntityDAO demoEntityDAO, String thread, Long id) {
+        final DemoEntity found = ems.doAction(e -> demoEntityDAO.find(e, id));
         print(thread, found);
         return found;
     }

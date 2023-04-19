@@ -15,7 +15,6 @@ package org.eclipse.kapua.commons.jpa;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.persistence.LockModeType;
 import javax.persistence.Query;
 import javax.persistence.TypedQuery;
 import javax.persistence.criteria.CriteriaBuilder;
@@ -110,8 +109,8 @@ public class EntityManager {
         javaxPersitenceEntityManager.flush();
     }
 
-    public <E> E find(Class<E> clazz, Object id, LockModeType lockModeType) {
-        return javaxPersitenceEntityManager.find(clazz, id, lockModeType);
+    public <E> E find(Class<E> clazz, Object id) {
+        return javaxPersitenceEntityManager.find(clazz, id);
     }
 
     public <E> void merge(E entity) {

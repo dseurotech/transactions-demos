@@ -7,6 +7,7 @@ import com.eurotech.persistence.transactions.jpa.JpaAwareTxContext;
 import javax.persistence.EntityExistsException;
 import javax.persistence.EntityManager;
 import javax.persistence.EntityNotFoundException;
+import javax.persistence.LockModeType;
 import javax.persistence.PersistenceException;
 import java.sql.SQLException;
 import java.util.Optional;
@@ -47,24 +48,14 @@ public class DemoEntityRepository<E extends DemoEntity> {
         }
     }
 
-    public Optional<E> find(TxContext txContext, Long entityId) {
+    public Optional<E> find(TxContext txContext, Long entityId, LockModeType lockModeType) {
         final javax.persistence.EntityManager em = JpaAwareTxContext.extractEntityManager(txContext);
-        return doFind(em, entityId);
+        return doFind(em, entityId, lockModeType);
     }
 
-    protected Optional<E> doFind(EntityManager em, Long entityId) {
-        return Optional.ofNullable(em.find(clazz, entityId));
+    protected Optional<E> doFind(EntityManager em, Long entityId, LockModeType lockModeType) {
+        return Optional.ofNullable(em.find(clazz, entityId, lockModeType));
     }
-
-    public E delete(TxContext txContext, long entityId) {
-        final EntityManager em = JpaAwareTxContext.extractEntityManager(txContext);
-        // Checking existence
-        return doFind(em, entityId)
-                // Deleting if found
-                .map(e -> doDelete(em, e))
-                .orElseThrow(() -> new EntityNotFoundException(Long.toString(entityId)));
-    }
-
 
     public E delete(TxContext txContext, E entityToDelete) {
         final EntityManager em = JpaAwareTxContext.extractEntityManager(txContext);
@@ -92,10 +83,10 @@ public class DemoEntityRepository<E extends DemoEntity> {
         return SQL_ERROR_CODE_CONSTRAINT_VIOLATION.equals(innerExc.getSQLState());
     }
 
-    public E update(TxContext txContext, E updatedEntity) {
+    public E update(TxContext txContext, E updatedEntity, LockModeType readLockModeType) {
         final javax.persistence.EntityManager em = JpaAwareTxContext.extractEntityManager(txContext);
         // Checking existence
-        return doFind(em, updatedEntity.getId())
+        return doFind(em, updatedEntity.getId(), readLockModeType)
                 // Updating if present
                 .map(ce -> doUpdate(em, ce, updatedEntity))
                 .orElseThrow(() -> new EntityNotFoundException(clazz.getSimpleName()));

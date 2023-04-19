@@ -33,6 +33,8 @@ public interface TxContext extends Closeable {
      * Convert exceptions happening within the transaction in a more generic form
      */
     RuntimeException convertPersistenceException(Exception e);
+
+    boolean isRecoverableException(Exception ex);
 }
 
 

@@ -1,15 +1,3 @@
-/*******************************************************************************
- * Copyright (c) 2016, 2022 Eurotech and/or its affiliates and others
- *
- * This program and the accompanying materials are made
- * available under the terms of the Eclipse Public License 2.0
- * which is available at https://www.eclipse.org/legal/epl-2.0/
- *
- * SPDX-License-Identifier: EPL-2.0
- *
- * Contributors:
- *     Eurotech - initial API and implementation
- *******************************************************************************/
 package org.eclipse.kapua.commons.jpa;
 
 import com.eurotech.demos.transactions.DemoEntity;
@@ -20,18 +8,19 @@ import javax.persistence.EntityNotFoundException;
 import javax.persistence.PersistenceException;
 import java.sql.SQLException;
 
-/**
- * @since 1.0.0
- */
-public class DemoDAO {
-
+public class DemoEntityDAO<E extends DemoEntity> {
     private static final String ATTRIBUTE_SEPARATOR = ".";
     private static final String ATTRIBUTE_SEPARATOR_ESCAPED = "\\.";
-
     private static final String COMPARE_ERROR_MESSAGE = "Trying to compare a non-comparable value";
     private static final String SQL_ERROR_CODE_CONSTRAINT_VIOLATION = "23505";
+    private final Class<E> clazz;
 
-    public static DemoEntity create(EntityManager em, DemoEntity entity) {
+    public DemoEntityDAO(Class<E> clazz) {
+        this.clazz = clazz;
+    }
+
+
+    public E create(EntityManager em, E entity) {
         try {
             em.persist(entity);
             em.flush();
@@ -39,8 +28,8 @@ public class DemoDAO {
         } catch (EntityExistsException e) {
             throw new EntityExistsException(e);
         } catch (PersistenceException e) {
-            if (isInsertConstraintViolation(e)) {
-                DemoEntity entityFound = em.find(NonVersionedEntity.class, entity.getId(), null);
+            if (DemoEntityDAO.isInsertConstraintViolation(e)) {
+                NonVersionedEntity entityFound = em.find(NonVersionedEntity.class, entity.getId());
                 if (entityFound == null) {
                     throw e;
                 }
@@ -53,16 +42,16 @@ public class DemoDAO {
         return entity;
     }
 
-    public static DemoEntity find(EntityManager em, Long entityId) {
+    public E find(EntityManager em, Long entityId) {
         // Checking existence
-        DemoEntity entityToFind = em.find(NonVersionedEntity.class, entityId, null);
+        E entityToFind = em.find(clazz, entityId);
         return entityToFind;
     }
 
-    public static DemoEntity update(EntityManager em, DemoEntity entity) {
+    public E update(EntityManager em, E entity) {
         //
         // Checking existence
-        DemoEntity entityToUpdate = em.find(NonVersionedEntity.class, entity.getId(), null);
+        E entityToUpdate = em.find(clazz, entity.getId());
 
         //
         // Updating if not null
@@ -77,10 +66,10 @@ public class DemoDAO {
         return entityToUpdate;
     }
 
-    public static DemoEntity delete(EntityManager em, Long entityId) {
+    public E delete(EntityManager em, Long entityId) {
         //
         // Checking existence
-        DemoEntity entityToDelete = find(em, entityId);
+        E entityToDelete = find(em, entityId);
 
         // Deleting if found
         if (entityToDelete != null) {
@@ -94,7 +83,6 @@ public class DemoDAO {
         // Returning deleted entity
         return entityToDelete;
     }
-
 
     /**
      * Check if the given {@link PersistenceException} is a SQL constraint violation error.

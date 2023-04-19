@@ -15,14 +15,9 @@ package com.eurotech.persistence.transactions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.persistence.EntityExistsException;
-import javax.persistence.OptimisticLockException;
-import javax.persistence.PessimisticLockException;
-import javax.persistence.RollbackException;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.function.BiConsumer;
-import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 public class TxManagerImpl implements TxManager {
@@ -45,28 +40,16 @@ public class TxManagerImpl implements TxManager {
                             .forEach(additionalTxConsumer -> additionalTxConsumer.accept(txContext, res));
                     txContext.commit();
                     return res;
-                } catch (OptimisticLockException | PessimisticLockException | RollbackException e) {
-                    Predicate isLockExceptionTester = t -> t instanceof OptimisticLockException || t instanceof PessimisticLockException;
-                    final boolean isValidLockException = isLockExceptionTester.test(e) || (e instanceof RollbackException && isLockExceptionTester.test(e.getCause()));
-                    if (isValidLockException) {
-                        logger.error("Lock exception, retrying", e);
-                        txContext.rollback();
-                    } else {
-                        logger.error("Non recoverable lock exception", e);
-                        txContext.rollback();
-                        throw txContext.convertPersistenceException(e);
-                    }
-                } catch (EntityExistsException e) {
-                    /*
-                     * Most KapuaEntities inherit from AbstractKapuaEntity, which auto-generates ids via a method marked with @PrePersist and the use of
-                     * a org.eclipse.kapua.commons.model.id.IdGenerator. Ids are pseudo-randomic. To deal with potential conflicts, a number of retries
-                     * is allowed. The entity needs to be detached in order for the @PrePersist method to be invoked once more, generating a new id
-                     * */
-                    logger.warn("Conflict on entity creation. Cannot insert the entity, trying again!");
-                    txContext.rollback();
                 } catch (Exception ex) {
                     txContext.rollback();
-                    throw txContext.convertPersistenceException(ex);
+                    if (!txContext.isRecoverableException(ex)) {
+                        throw txContext.convertPersistenceException(ex);
+                    }
+                    if (++retry >= maxInsertAttempts) {
+                        logger.error("Recoverable exception, but retry attempts exceeded, failing", ex);
+                        throw txContext.convertPersistenceException(ex);
+                    }
+                    logger.warn("Recoverable exception, retrying", ex);
                 }
             }
         } finally {

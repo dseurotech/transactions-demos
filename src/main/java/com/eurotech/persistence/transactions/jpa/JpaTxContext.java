@@ -13,16 +13,24 @@
 package com.eurotech.persistence.transactions.jpa;
 
 import com.eurotech.persistence.transactions.TxContext;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
+import javax.persistence.EntityExistsException;
 import javax.persistence.EntityManager;
 import javax.persistence.EntityManagerFactory;
 import javax.persistence.EntityTransaction;
+import javax.persistence.OptimisticLockException;
+import javax.persistence.PessimisticLockException;
+import javax.persistence.RollbackException;
 import java.io.IOException;
 import java.util.Optional;
+import java.util.function.Predicate;
 
 public class JpaTxContext implements JpaAwareTxContext, TxContext {
     public final EntityManagerFactory entityManagerFactory;
     Optional<EntityManager> entityManager = Optional.empty();
+    private final Logger logger = LoggerFactory.getLogger(this.getClass());
 
     public JpaTxContext(EntityManagerFactory entityManagerFactory) {
         this.entityManagerFactory = entityManagerFactory;
@@ -62,5 +70,27 @@ public class JpaTxContext implements JpaAwareTxContext, TxContext {
     @Override
     public RuntimeException convertPersistenceException(Exception ex) {
         return Optional.ofNullable(ex).map(e -> new RuntimeException(e)).orElse(new RuntimeException("no details"));
+    }
+
+    private final Predicate isLockExceptionTester = t -> t instanceof OptimisticLockException || t instanceof PessimisticLockException;
+
+    @Override
+    public boolean isRecoverableException(Exception e) {
+        if (e instanceof EntityExistsException) {
+
+            /*
+             * Most KapuaEntities inherit from AbstractKapuaEntity, which auto-generates ids via a method marked with @PrePersist and the use of
+             * a org.eclipse.kapua.commons.model.id.IdGenerator. Ids are pseudo-randomic. To deal with potential conflicts, a number of retries
+             * is allowed. The entity needs to be detached in order for the @PrePersist method to be invoked once more, generating a new id
+             * */
+            logger.warn("Conflict on entity creation. Cannot insert the entity, trying again!");
+            return true;
+        }
+        final boolean isValidLockException = isLockExceptionTester.test(e) || (e instanceof RollbackException && isLockExceptionTester.test(e.getCause()));
+        if (isValidLockException) {
+            logger.warn("Recoverable Lock Exception");
+            return true;
+        }
+        return false;
     }
 }

@@ -43,8 +43,6 @@ public class Deleter<E extends DemoEntity> extends Thread {
     @Override
     public void run() {
         try {
-
-
             Utils.print(threadName, "started");
             txManagerSupplier.get().execute(tx -> {
                 final DemoEntity entity = Utils.fetchAndPrint(tx, clazz, threadName, idToUpdate, readLockModeType);
@@ -62,6 +60,7 @@ public class Deleter<E extends DemoEntity> extends Thread {
                 return res;
             });
         } catch (Throwable t) {
+            Utils.print(threadName, "failed");
             this.threadFailed.set(true);
         }
     }

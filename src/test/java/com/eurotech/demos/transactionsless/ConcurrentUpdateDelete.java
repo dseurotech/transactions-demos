@@ -1,88 +1,120 @@
 package com.eurotech.demos.transactionsless;
 
 import com.eurotech.demos.transactions.DemoEntity;
+import com.eurotech.demos.transactions.NonVersionedEntity;
+import com.eurotech.demos.transactions.VersionedEntity;
 import org.eclipse.kapua.commons.jpa.AbstractEntityManagerFactory;
-import org.eclipse.kapua.commons.jpa.DemoDAO;
+import org.eclipse.kapua.commons.jpa.DemoEntityDAO;
 import org.eclipse.kapua.commons.jpa.EntityManagerSession;
+import org.javatuples.Triplet;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+
+import java.util.function.Function;
 
 public class ConcurrentUpdateDelete {
     final EntityManagerSession ems = new EntityManagerSession(new AbstractEntityManagerFactory("demos") {
     });
 
-    /**
-     * This demonstrates the interaction between two different threads (T1 and T2) concurrently operating on the same entity,
-     * using the current Kapua model (no transaction management)
-     * <p>
-     * T1 starts first and fetches the entity, then waits 2 seconds before deleting it
-     * T2 starts after 1 second, immediately fetches the entity and updates it
-     * the Main thread checks the value of the entity at different points in time
-     * <p>
-     * This utility method is meant to be invoked by the test {@link #demoConcurrentUpdateDelete()}
-     *
-     * @param t1Throws Whether T1 should throw just before completing the transaction (demonstating the behaviour of the system in case of rollbacks)
-     * @return The final state of the entity, fetched by the main thread after all other threads are complete
-     * @throws InterruptedException never, really
-     */
-    private DemoEntity doDemoConcurrentUpdateDelete(boolean t1Throws) throws InterruptedException {
-        final DemoEntity initialEntity = Utils.createEntity(ems, "Entity Content");
-        Thread t1 = new Thread(() -> {
-            Utils.print("T1", "started");
-            final DemoEntity t1Found = Utils.fetchAndPrint(ems, "T1", initialEntity.getId());
-            Utils.sleep(2000);
-            ems.doTransactedAction(e -> DemoDAO.delete(e, t1Found.getId()));
-            Utils.print("T1", "deletes entity");
-            if (t1Throws) {
-                Utils.print("T1", "Goes baboom!");
-                throw new RuntimeException("BABOOM!!");
-            }
-            Utils.fetchAndPrint(ems, "T1", initialEntity.getId());
-        });
-        Thread t2 = new Thread(() -> {
-            Utils.print("T2", "started");
-            final DemoEntity t2Found = Utils.fetchAndPrint(ems, "T2", initialEntity.getId());
-            if (t2Found == null) {
-                Utils.print("T2", "notices null entity and exits");
-                return;
-            }
-            t2Found.setContent(t2Found.getContent() + " plus T2");
-            ;
-            ems.doTransactedAction(e -> DemoDAO.update(e, t2Found));
-            Utils.print("T2", "changed entity content");
-            Utils.fetchAndPrint(ems, "T2", initialEntity.getId());
-        });
+    private <E extends DemoEntity> Triplet<DemoEntity, Boolean, Boolean> doDemoConcurrentDeleteUpdate(
+            Function<String, E> entityCreator,
+            Class<E> clazz,
+            int t1SleepBeforeUpdate,
+            boolean t1Throws) throws InterruptedException {
+        System.out.println("\n\n* Concurrent update demo without transactions **************************************");
+        Utils.print("TEST", String.format("class: %s,  t1 throws: %s", clazz.getSimpleName(), t1Throws));
+        final DemoEntityDAO<E> demoEntityDAO = new DemoEntityDAO<>(clazz);
+        final DemoEntity initialEntity = ems.doTransactedAction(e -> demoEntityDAO.create(e, entityCreator.apply("Entity Content")));
+        Deleter t1 = new Deleter<>("T1", demoEntityDAO, initialEntity.getId(), ems, t1SleepBeforeUpdate, t1Throws);
+        Updater t2 = new Updater<>("T2", demoEntityDAO, initialEntity.getId(), ems, 500, false);
         t1.start();
         Utils.sleep(1000);
         t2.start();
 
-        Utils.fetchAndPrint(ems, "MAIN", initialEntity.getId());
+        Utils.fetchAndPrint(ems, demoEntityDAO, "MAIN", initialEntity.getId());
         t1.join();
         Utils.print("MAIN", "T1 joined");
-        Utils.fetchAndPrint(ems, "MAIN", initialEntity.getId());
+        Utils.fetchAndPrint(ems, demoEntityDAO, "MAIN", initialEntity.getId());
         t2.join();
         Utils.print("MAIN", "T2 joined");
-        return Utils.fetchAndPrint(ems, "MAIN", initialEntity.getId());
+        return Triplet.with(
+                Utils.fetchAndPrint(ems, demoEntityDAO, "MAIN", initialEntity.getId()),
+                t1.threadFailed.get(),
+                t2.threadFailed.get());
     }
 
+    //
+
     /**
-     * This executes {@link #doDemoConcurrentUpdateDelete(boolean)} without and with T1 failing.
+     * This executes {@link #doDemoConcurrentDeleteUpdate(Function, Class, int, boolean)}
      * The two threads are not isolated from each other, and the last to complete overrides all the changes from the other
      *
      * @throws InterruptedException never, really
      */
     @Test
-    public void demoConcurrentUpdateDelete() throws InterruptedException {
-        { //T1 NOT throwing
-            DemoEntity res = doDemoConcurrentUpdateDelete(false);
-            //WRONG: T2 completed correctly (did not see the entity deleted), where is the updated entity?
-            Assertions.assertNull(res);
+    public void t2finishesFirst() throws InterruptedException {
+        {
+            Triplet<DemoEntity, Boolean, Boolean> res = doDemoConcurrentDeleteUpdate(NonVersionedEntity::newEntity, NonVersionedEntity.class, 2000, false);
+            Assertions.assertNull(res.getValue0());
+            Assertions.assertFalse(res.getValue1());
+            Assertions.assertFalse(res.getValue2());
         }
-        System.out.println("\n\n\n");
-        { //T1 DOES throw
-            DemoEntity res = doDemoConcurrentUpdateDelete(true);
-            //WRONG: T1 failed, and yet the entity is deleted
-            Assertions.assertNull(res);
+        {
+            Triplet<DemoEntity, Boolean, Boolean> res = doDemoConcurrentDeleteUpdate(VersionedEntity::newEntity, VersionedEntity.class, 2000, false);
+            Assertions.assertNull(res.getValue0());
+            Assertions.assertFalse(res.getValue1());
+            Assertions.assertFalse(res.getValue2());
         }
     }
+
+    @Test
+    public void t1finishesFirst() throws InterruptedException {
+        {
+            Triplet<DemoEntity, Boolean, Boolean> res = doDemoConcurrentDeleteUpdate(NonVersionedEntity::newEntity, NonVersionedEntity.class, 1250, false);
+            Assertions.assertNull(res.getValue0());
+            Assertions.assertFalse(res.getValue1());
+            Assertions.assertTrue(res.getValue2());
+        }
+        {
+            Triplet<DemoEntity, Boolean, Boolean> res = doDemoConcurrentDeleteUpdate(VersionedEntity::newEntity, VersionedEntity.class, 1250, false);
+            Assertions.assertNull(res.getValue0());
+            Assertions.assertFalse(res.getValue1());
+            Assertions.assertTrue(res.getValue2());
+        }
+    }
+
+    /**
+     * This executes {@link #doDemoConcurrentDeleteUpdate(Function, Class, int, boolean)}
+     * The two threads are not isolated from each other, and the last to complete overrides all the changes from the other
+     *
+     * @throws InterruptedException never, really
+     */
+    @Test
+    public void t2finishesFirst_withT1Failing() throws InterruptedException {
+        {
+            Triplet<DemoEntity, Boolean, Boolean> res = doDemoConcurrentDeleteUpdate(NonVersionedEntity::newEntity, NonVersionedEntity.class, 2000, true);
+            Assertions.assertNull(res.getValue0());
+            Assertions.assertFalse(res.getValue2());
+        }
+        {
+            Triplet<DemoEntity, Boolean, Boolean> res = doDemoConcurrentDeleteUpdate(VersionedEntity::newEntity, VersionedEntity.class, 2000, true);
+            Assertions.assertNull(res.getValue0());
+            Assertions.assertFalse(res.getValue2());
+        }
+    }
+
+    @Test
+    public void t1finishesFirst_withT1Failing() throws InterruptedException {
+        {
+            Triplet<DemoEntity, Boolean, Boolean> res = doDemoConcurrentDeleteUpdate(NonVersionedEntity::newEntity, NonVersionedEntity.class, 1250, true);
+            Assertions.assertNull(res.getValue0());
+            Assertions.assertTrue(res.getValue2());
+        }
+        {
+            Triplet<DemoEntity, Boolean, Boolean> res = doDemoConcurrentDeleteUpdate(VersionedEntity::newEntity, VersionedEntity.class, 1250, true);
+            Assertions.assertNull(res.getValue0());
+            Assertions.assertTrue(res.getValue2());
+        }
+    }
+
 }
